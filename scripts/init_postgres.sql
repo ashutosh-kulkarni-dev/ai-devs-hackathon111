@@ -45,3 +45,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 -- No UPDATE/DELETE grants issued to application roles by design;
 -- application only ever INSERTs into audit_log.
+
+-- Single-row high-water mark for the audit chain tip (Phase 5, plan_3.md).
+-- Updated in the same transaction as every audit_log insert. /verify
+-- compares this against whatever rows are actually visible, so deleting
+-- the newest N audit_log rows is detected even though the remaining chain
+-- still links up cleanly on its own.
+CREATE TABLE IF NOT EXISTS audit_checkpoint (
+    id          BOOLEAN PRIMARY KEY DEFAULT true,
+    latest_seq  BIGINT NOT NULL DEFAULT 0,
+    latest_hash TEXT NOT NULL DEFAULT repeat('0', 64),
+    CONSTRAINT audit_checkpoint_singleton CHECK (id)
+);
+INSERT INTO audit_checkpoint (id, latest_seq, latest_hash)
+VALUES (true, 0, repeat('0', 64))
+ON CONFLICT (id) DO NOTHING;

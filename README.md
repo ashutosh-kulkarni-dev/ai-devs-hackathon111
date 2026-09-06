@@ -10,10 +10,16 @@ This is the Stage 2 submission — a running system, not just a design. See `doc
 
 This repo ships two runnable versions of the same design, for two different purposes:
 
-1. **`web/` — the live demo, deployable to Vercel in a few clicks.** A single Next.js app collapsing the API Gateway, PII masking, orchestrator, and all four agents into one project, using Vercel's built-in Postgres storage. This is what you hand to judges as a clickable URL. See `web/README.md` for one-click deploy steps.
-2. **`services/` + `docker-compose.yml` — the full reference architecture.** The mandatory hackathon stack (Google ADK, Qdrant, Lyzr) wired together with real async Pub/Sub messaging, a standalone Qdrant vector DB, and Microsoft Presidio PII masking. This is the architecture described in `docs/architecture.md` and is what demonstrates production-grade design depth.
+1. **`services/` + `docker-compose.yml` — the reference architecture and the canonical implementation.** The mandatory hackathon stack (Google ADK, Qdrant, Lyzr) wired together with real async Pub/Sub messaging, a standalone Qdrant vector DB, and Microsoft Presidio PII masking, fronted by the `frontend/` dashboard (port 5173). This is the architecture described in `docs/architecture.md`, demonstrates production-grade design depth, and is where new fixes and behavior land first.
+2. **`web/` — a static demo mirror, deployable to Vercel in a few clicks.** A single Next.js app that re-implements the same design as serverless functions, using Vercel's built-in Postgres storage, so it's a clickable URL you can hand to judges with zero infrastructure setup. See `web/README.md` for one-click deploy steps.
 
-Both run the identical CRISPE prompts, output schemas, and agent logic (`docs/prompts/`) — the Vercel version substitutes serverless-friendly infrastructure (concurrent function calls instead of Pub/Sub, request-time cosine similarity instead of a Qdrant container, regex PII masking instead of Presidio) where a container-based service doesn't fit a stateless function runtime. Every substitution is listed and justified in `web/README.md`.
+**`web/` is a demo mirror, not a behaviorally-identical twin.** It shares the same CRISPE prompt intent and output schemas, but several concrete divergences mean the same input is not guaranteed to produce the same output in both stacks:
+- **Sanctions matching** uses a different string-similarity algorithm — Python's `difflib.SequenceMatcher` (Ratcliff/Obershelp) in `services/mock_sanctions_api`, a Dice-coefficient bigram overlap in `web/lib/sanctions.ts` — so the same name pair can land on different sides of the HIT/PARTIAL_HIT/NO_HIT thresholds.
+- **PII masking** in `web/lib/pii.ts` is regex-based (email, phone, SSN, card number) with no PERSON-name detector; `services/pii_masking` (Microsoft Presidio) does detect names.
+- **`POST /alerts` status contract** differs: `services/` returns `IN_PROGRESS` (processing is genuinely asynchronous); `web/` returns `PENDING_REVIEW` (it finishes end-to-end within the one request).
+- **Report narrative format** differs: `services/`'s Report Generator writes a plain-language paragraph; `web/`'s writes a one-sentence summary plus 2-3 bullet points.
+
+See `web/README.md`'s "Known divergences" section for the full list. Treat `web/` as a fully-functional demo of the same idea, not a certified twin of `services/`'s behavior — if the two ever need to match exactly, `services/` is the one to trust.
 
 ## What changed since Stage 1
 
@@ -22,13 +28,27 @@ Stage 1 scored "Strongly Aligned" with the track but flagged four gaps. Each is 
 | Stage 1 finding | Fix | Where |
 | :--- | :--- | :--- |
 | Synchronous orchestration → tight coupling, latency risk | Orchestrator and agents communicate only via Pub/Sub topics (emulator locally, same SDK as production Cloud Pub/Sub) | `services/orchestrator/`, `docs/architecture.md` |
-| No production-grade prompt specs (CRISPE, output schemas, few-shot) | CRISPE prompt appendix per agent, enforced at runtime via Gemini `response_schema` | `docs/prompts/*.md`, `services/agents/*/agent.py` |
+| No production-grade prompt specs (CRISPE, output schemas, few-shot) | CRISPE prompt appendix per agent, enforced at runtime via Groq JSON mode + Pydantic validation | `docs/prompts/*.md`, `services/agents/*/agent.py` |
 | No explicit security controls (encryption, input validation) | Pydantic schema validation at every boundary; PII masking with a scripted leak test; security control table split into "implemented" vs "documented production target" | `docs/PRD.md` §7 |
-| No LLM observability (OpenTelemetry, correlation IDs) | OpenTelemetry spans around every agent/orchestrator call, tagged with the case's correlation ID; token + latency tracked per LLM call | `services/agents/common/tracing.py` |
+| No LLM observability (OpenTelemetry, correlation IDs) | OpenTelemetry spans around every agent/orchestrator call, tagged with the case's correlation ID; token + latency tracked per LLM call | `services/common/tracing.py` |
+
+## Known issues → fixed
+
+An internal review (`plan_3.md`) found and closed five correctness bugs, in the same "no silent failures" spirit as the Stage 1 fixes above. Each has a regression test in `services/tests/`:
+
+| Finding | Fix | Where |
+| :--- | :--- | :--- |
+| A crashed agent mid-handler acked its message before processing it, so a single bad message silently dropped a case (at-least-once delivery had quietly become at-most-once) | Ack only after the handler succeeds; nack on failure so the emulator/production Pub/Sub redelivers; dead-letter (with the error) after N failed attempts instead of looping or vanishing | `services/common/pubsub_client.py`, `test_pubsub_client.py` |
+| A dead PII masking service made the API Gateway log a warning and forward the **unmasked** narrative to every downstream agent and the audit log | `POST /alerts` now fails closed: masking unavailable → `503`, alert rejected, nothing unmasked ever published | `services/api_gateway/main.py`, `test_api_gateway_pii.py` |
+| The orchestrator guessed a 3-agent expected-set for any result with no recorded dispatch plan, so a 2-agent Lyzr plan hung forever waiting for a third result that would never come; a redelivered dispatch also wholesale-overwrote already-collected results | Expected-set comes only from the recorded plan (an unplanned result is held for redelivery, never guessed); dispatch is idempotent on redelivery; a background join-timeout sweeper completes a stuck case with a `partial: true` report and the list of missing agents | `services/orchestrator/orchestrator.py`, `test_orchestrator_fanin.py` |
+| A reprocessed report-generator task (now possible under the retry fix above) unconditionally reset an already-resolved case back to `PENDING_REVIEW`, silently discarding an analyst's verdict | The upsert only writes when the case isn't already in a terminal state (`CONFIRMED_FRAUD` / `FALSE_POSITIVE`); reprocessing a resolved case is a no-op | `services/agents/report_generator/agent.py`, `test_report_generator_idempotency.py` |
+| `GET /audit/verify` recomputed the chain over whatever rows currently existed, so editing a row was caught but **deleting the newest rows was not** — the truncated chain still verified clean | A checkpoint table anchors the chain tip in the same transaction as every log write; `/verify` now also checks the visible tip against that checkpoint, so a truncation reports invalid with the expected-vs-actual sequence | `services/audit_log/audit.py`, `test_audit_truncation.py` |
+
+Also cleaned up in the same pass: `services/api_gateway/common/`, `services/orchestrator/common/`, and `services/agents/common/` were three byte-identical copies of the same module tree, requiring every fix above to be hand-applied three times — collapsed into one canonical `services/common/`. CI itself couldn't previously fail on anything but a Python syntax error (`ruff --exit-zero`, no tests, no `web/` build check); it now runs `pytest`, blocks on lint, and builds both `frontend/` and `web/`.
 
 ## Architecture at a glance
 
-Flagged alert → API Gateway (input validation) → PII Masking → Pub/Sub → Lyzr Orchestrator (Gemini 2.5 Pro) fans out to three parallel agents (KYC Retriever, Transaction Analyzer, Fraud Case Search — all Google ADK + Gemini 2.5 Flash) → Report Generator (Gemini 2.5 Pro) synthesizes a schema-enforced, evidence-cited report → Analyst Dashboard (scroll-gated verdict) → confirmed/false-positive verdict is embedded and written back into Qdrant's fraud case memory.
+Flagged alert → API Gateway (input validation) → PII Masking → Pub/Sub → Lyzr Orchestrator (Lyzr Studio agent) fans out to three parallel agents (KYC Retriever, Transaction Analyzer, Fraud Case Search — all Google ADK + Groq `openai/gpt-oss-20b`) → Report Generator (Groq `openai/gpt-oss-120b`) synthesizes a schema-enforced, evidence-cited report → Analyst Dashboard (scroll-gated verdict) → confirmed/false-positive verdict is embedded and written back into Qdrant's fraud case memory.
 
 Every hop is logged to a hash-chained, tamper-evident audit log that you can verify live (`GET /audit/verify`) — see `docs/architecture.md` for the full diagram and the local-vs-production substitution table (Postgres↔Spanner, hashed log↔BigQuery+CMEK, mock Sanctions API↔licensed vendor, etc.).
 
@@ -85,7 +105,10 @@ services/
     transaction_analyzer/ Google ADK agent
     fraud_case_search/    Google ADK agent
     report_generator/     Google ADK agent
-frontend/               React + Tailwind + TypeScript analyst dashboard
+frontend/               React + Tailwind + TypeScript analyst dashboard for the services/
+                        stack above (the one Quickstart opens on :5173) -- not a dead
+                        duplicate of web/'s dashboard, which is a separate UI for a
+                        separate backend (see "Two ways to run this")
 fixtures/               Synthetic transactions, KYC docs, sanctions watchlist, historical fraud cases
 scripts/                Seed scripts + one-command demo runner
 ```

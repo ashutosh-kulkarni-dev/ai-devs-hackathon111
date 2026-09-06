@@ -1,6 +1,6 @@
 # CRISPE Prompt Spec — Report Generator Agent
 
-Model: Gemini 2.5 Pro (via Google ADK) · Output schema: `InvestigationReport` (services/agents/common/schemas.py)
+Model: Groq openai/gpt-oss-120b (via Google ADK) · Output schema: `InvestigationReport` (services/common/schemas.py)
 
 This is the single highest-stakes prompt in the system: its output is read directly by the fraud analyst and retained as the AI explainability record for regulators (PRD section 7).
 
@@ -34,7 +34,7 @@ Output: `fraud_probability` under 20, `recommended_action="CLEAR_FALSE_POSITIVE"
 Input: mixed signals — `anomaly_score=55`, a `PARTIAL_HIT` sanctions match, moderate (0.6) case similarity.
 Output: `fraud_probability` in the 40-65 range, `recommended_action="MANUAL_REVIEW"`, `confidence="MEDIUM"` or `"LOW"`, narrative flags the conflicting signals rather than forcing a confident verdict.
 
-## Output schema (JSON Schema, enforced via Gemini `response_schema`)
+## Output schema (JSON Schema, enforced via Groq JSON mode + Pydantic validation)
 ```json
 {
   "case_id": "string",

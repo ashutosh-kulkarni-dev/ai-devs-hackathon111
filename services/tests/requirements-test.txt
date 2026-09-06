@@ -1,0 +1,13 @@
+# Test-only dependency set for `pytest services/tests`. Versions are kept in
+# lockstep with the per-service requirements.txt files these tests exercise
+# (api_gateway, audit_log, agents/common, orchestrator) so the test
+# environment matches what actually ships.
+pytest==8.3.2
+httpx==0.27.0
+fastapi==0.111.0
+psycopg2-binary==2.9.9
+requests==2.32.3
+pydantic==2.7.4
+google-cloud-pubsub==2.21.5
+qdrant-client==1.9.1
+numpy==1.26.4

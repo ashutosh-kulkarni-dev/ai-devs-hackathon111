@@ -8,11 +8,10 @@ this stage is paired with Google Cloud DLP for a second, independent pass
 docs/PRD.md security section. For the hackathon build, Presidio alone runs
 for real, since that's what's demonstrable without a GCP project.
 """
-import os
 from fastapi import FastAPI
-from pydantic import BaseModel
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
+from pydantic import BaseModel
 
 app = FastAPI(title="PII Masking Service", version="1.0.0")
 

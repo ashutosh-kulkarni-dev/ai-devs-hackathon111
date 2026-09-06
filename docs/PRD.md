@@ -41,13 +41,13 @@ Stage 1 feedback: *"Reliance on synchronous internal APIs for agent orchestratio
 
 1.  **Trigger:** A flagged transaction alert enters via the **API Gateway** (FastAPI, strict Pydantic/JSON schema validation at the boundary — OWASP API1/API8 input-validation control).
 2.  **Privacy Layer:** The **PII Masking Service** (Microsoft Presidio; Google DLP API as a second, independent pass in production) redacts sensitive customer data before any information is passed to the LLMs.
-3.  **Async Dispatch:** The gateway publishes an `investigation-tasks` message to **Google Cloud Pub/Sub** (Pub/Sub emulator for local/hackathon runs, same SDK and wire protocol as production). The **Lyzr Investigation Orchestrator** (Gemini 2.5 Pro) consumes this, decides the dispatch plan, and publishes one task message per worker agent to its own topic — it never calls a worker agent directly.
-4.  **Agent Swarm (parallel, decoupled):** Specialized agents built with **Google Agent Development Kit (ADK)** and **Gemini 2.5 Flash**, each an independent Pub/Sub subscriber/publisher:
+3.  **Async Dispatch:** The gateway publishes an `investigation-tasks` message to **Google Cloud Pub/Sub** (Pub/Sub emulator for local/hackathon runs, same SDK and wire protocol as production). The **Lyzr Investigation Orchestrator** (reasoning via whatever model the configured Lyzr Studio agent runs) consumes this, decides the dispatch plan, and publishes one task message per worker agent to its own topic — it never calls a worker agent directly.
+4.  **Agent Swarm (parallel, decoupled):** Specialized agents built with **Google Agent Development Kit (ADK)** and **Groq (`openai/gpt-oss-20b`)**, each an independent Pub/Sub subscriber/publisher:
     *   **KYC Retriever:** Pulls documents and checks the **Sanctions & PEP API**.
     *   **Transaction Analyzer:** Queries the Transaction History store for behavioral anomalies.
     *   **Fraud Case Search:** Queries **Qdrant** for semantically similar historical cases.
     Each publishes its result to its own `*-results` topic — no agent blocks on another.
-5.  **Join & Synthesis:** The orchestrator's result-consumer threads independently collect each agent's output; once all planned results for a case are in, it publishes a single `report-generator-tasks` message. The **Report Generator Agent** (Gemini 2.5 Pro) compiles findings into a narrative with specific evidence citations, enforced against a strict output schema (see §11).
+5.  **Join & Synthesis:** The orchestrator's result-consumer threads independently collect each agent's output; once all planned results for a case are in, it publishes a single `report-generator-tasks` message. The **Report Generator Agent** (Groq `openai/gpt-oss-120b`) compiles findings into a narrative with specific evidence citations, enforced against a strict output schema (see §11).
 6.  **Human-in-the-Loop:** The analyst reviews the report on the **Analyst Dashboard**; the UI withholds the decision buttons until the analyst has scrolled through the full evidence list (mitigation for analyst over-reliance, §8).
 7.  **Feedback Loop:** The final decision is embedded and written back to **Qdrant** to improve future retrieval accuracy (§6).
 8.  **Compliance:** Every step is logged in an **immutable, hash-chained audit log** (§7).
@@ -59,11 +59,11 @@ Stage 1 feedback: *"Reliance on synchronous internal APIs for agent orchestratio
 | **API Gateway** | Entry point for alerts; input-schema validation; auth. | FastAPI, Pydantic | Flagged Transaction Alert | `investigation-tasks` Pub/Sub message | N/A |
 | **PII Masking Service** | Redacts/masks PII before any LLM sees data. | Python, Microsoft Presidio (+ Google DLP in prod) | Raw text/customer fields | Masked text | N/A |
 | **Pub/Sub Message Bus** | Decouples orchestrator from worker agents; all inter-agent communication. | Google Cloud Pub/Sub (emulator locally) | Task/result messages | Task/result messages | N/A |
-| **Investigation Orchestrator** | Decides dispatch plan; joins agent results; triggers Report Generator. | Lyzr, Gemini 2.5 Pro | Masked alert | Task messages per agent | Audit & Compliance Log |
-| **KYC Retriever Agent** | Extracts KYC details and performs identity verification. | Google ADK, Gemini 2.5 Flash | Customer ID, task message | `KYCSummary` (schema-enforced) | KYC Document Store |
-| **Transaction Analyzer Agent** | Analyzes 12-month history for behavioral anomalies. | Google ADK, Gemini 2.5 Flash | Account ID, task message | `AnomalyReport` (schema-enforced) | Transaction History DB |
-| **Fraud Case Search Agent** | Finds similar historical fraud cases via hybrid vector search. | Google ADK, Gemini 2.5 Flash | Case narrative, task message | `FraudCaseSearchResult` (schema-enforced) | Qdrant Vector DB |
-| **Report Generator Agent** | Synthesizes all agent findings into a final, cited narrative. | Google ADK, Gemini 2.5 Pro | All agent findings | `InvestigationReport` (schema-enforced) | Investigation Case DB |
+| **Investigation Orchestrator** | Decides dispatch plan; joins agent results; triggers Report Generator. | Lyzr (model per Lyzr Studio config) | Masked alert | Task messages per agent | Audit & Compliance Log |
+| **KYC Retriever Agent** | Extracts KYC details and performs identity verification. | Google ADK, Groq `openai/gpt-oss-20b` | Customer ID, task message | `KYCSummary` (schema-enforced) | KYC Document Store |
+| **Transaction Analyzer Agent** | Analyzes 12-month history for behavioral anomalies. | Google ADK, Groq `openai/gpt-oss-20b` | Account ID, task message | `AnomalyReport` (schema-enforced) | Transaction History DB |
+| **Fraud Case Search Agent** | Finds similar historical fraud cases via hybrid vector search. | Google ADK, Groq `openai/gpt-oss-20b` | Case narrative, task message | `FraudCaseSearchResult` (schema-enforced) | Qdrant Vector DB |
+| **Report Generator Agent** | Synthesizes all agent findings into a final, cited narrative. | Google ADK, Groq `openai/gpt-oss-120b` | All agent findings | `InvestigationReport` (schema-enforced) | Investigation Case DB |
 | **Analyst Dashboard** | UI for case review, de-masking, and final decisioning. | React, Tailwind, TypeScript | Final report | Analyst verdict (Confirm/Override) | Investigation Case DB |
 | **Sanctions & PEP API** | External check for watchlists and political exposure. | REST API (mock fixture-backed locally; real vendor e.g. World-Check in prod) | Customer name/DOB | Screening status (Hit/Partial/No-Hit) | N/A |
 | **Transaction History DB** | Source of truth for all financial transactions. | Postgres locally (Cloud Spanner in prod) | Query parameters | Transaction records | N/A |
@@ -77,7 +77,7 @@ The system implements a "Self-Improving Memory" via the integration between the 
 
 *   **Data Capture:** When an analyst submits a final verdict (e.g., "Confirmed Fraud - Account Takeover"), the system captures the final narrative, the evidence summary, and the analyst's reasoning.
 *   **Embedding & Metadata:** This data is converted into a vector embedding, appended with structured metadata: `fraud_type`, `amount_bracket`, `channel` (e.g., Wire, ACH), `geography`, and `resolution_date`.
-*   **Write-Back:** The embedding and metadata are stored in the **Qdrant Vector DB (Fraud Case Memory)** — implemented in `services/api_gateway/common/qdrant_writeback.py`.
+*   **Write-Back:** The embedding and metadata are stored in the **Qdrant Vector DB (Fraud Case Memory)** — implemented in `services/common/qdrant_writeback.py`.
 *   **Retrieval Improvement:** During the next investigation, the **Fraud Case Search Agent** performs a hybrid search (semantic similarity + metadata filtering), allowing the AI to tell the analyst: *"This case is 92% similar to Case #882, which you confirmed as a 'Mule Account' last week."*
 
 ## 7. Security, Privacy & Regulatory Compliance
@@ -89,7 +89,7 @@ To meet stringent banking regulations (AML, GDPR, CCPA), the following controls 
 | Encryption in transit | TLS 1.3 on all service-to-service and external traffic | Documented infra requirement; local dev runs over the docker-compose internal network. Ingress config (Caddy/nginx TLS termination) included as a reference in `docs/architecture.md`. |
 | Encryption at rest | AES-256 on all data stores (Cloud SQL, GCS, BigQuery, Qdrant) | Documented as a Postgres/GCS configuration flag; not demoed live (no managed KMS in a local sandbox). |
 | Input validation | Strict JSON schema validation at every service boundary (OWASP API1/API8) | **Implemented**: Pydantic models validate every API Gateway request (`FlaggedAlert`, `VerdictRequest`) and every agent's Pub/Sub task payload before processing. |
-| PII redaction | No raw customer PII ever reaches Gemini models | **Implemented**: PII Masking Service (Presidio) runs on all free-text fields before publish; `/leak_test` endpoint scripted for CI. |
+| PII redaction | No raw customer PII ever reaches Groq models | **Implemented**: PII Masking Service (Presidio) runs on all free-text fields before publish; `/leak_test` endpoint scripted for CI. |
 | IAM-gated de-masking | Only the Analyst Dashboard, under Google Cloud IAM roles, can de-mask data | Stubbed via an API-key check (`/cases/{id}/demask`) for the demo; every call is logged regardless. Production: replace with IAM/OAuth2 role check. |
 | Immutable audit trail | Every prompt, reasoning step, and agent interaction logged, tamper-proof | **Implemented, and verifiable live**: hash-chained append-only Postgres table (`services/audit_log`); `GET /audit/verify` recomputes the chain and reports the exact row if tampered. Production target: BigQuery insert-only table with CMEK. |
 | AI explainability | Fraud probability directly linked to cited evidence, no hallucinated citations | **Implemented**: Report Generator's output schema requires `evidence_citations`; prompt (see `docs/prompts/report_generator.md`) forbids citing an `evidence_id` not present in upstream agent outputs. |
@@ -104,7 +104,7 @@ To meet stringent banking regulations (AML, GDPR, CCPA), the following controls 
 | **Qdrant Retrieval Misses** | Low | Medium | Hybrid search implementation combining semantic embeddings with hard metadata filters (e.g., amount bracket, geography). |
 | **Analyst Over-reliance** | High | High | Dashboard UI forces analysts to scroll through evidence before the "Confirm/False Positive" buttons unlock; periodic "blind" audits recommended in production. |
 | **PII Leakage to LLM** | Low | Critical | Presidio redaction pass (+ Google DLP in prod) before any LLM call; `/leak_test` endpoint for automated CI leak tests. |
-| **Latency Spikes** | Medium | Low | Gemini 2.5 Flash for high-volume worker agents; async Pub/Sub dispatch avoids blocking the orchestrator on any single slow agent. |
+| **Latency Spikes** | Medium | Low | Groq openai/gpt-oss-20b for high-volume worker agents; async Pub/Sub dispatch avoids blocking the orchestrator on any single slow agent. |
 | **Orchestration coupling / SPOF** (Stage 1 finding) | — | — | Resolved by the Pub/Sub-based architecture in §4 — orchestrator and agents communicate only via topics, no synchronous RPC. |
 
 ## 9. Future Roadmap
@@ -153,6 +153,6 @@ Full CRISPE-framework prompt specifications, output JSON schemas, and few-shot e
 - `docs/prompts/fraud_case_search.md`
 - `docs/prompts/report_generator.md`
 
-These are not just documentation — every schema referenced is enforced at runtime via Gemini's `response_schema` parameter (see `services/agents/common/llm_client.py` and `schemas.py`), so the PRD's prompt specification and the running code cannot drift apart silently.
+These are not just documentation — every schema referenced is enforced at runtime via Groq's JSON mode plus Pydantic validation (see `services/common/llm_client.py` and `schemas.py`), so the PRD's prompt specification and the running code cannot drift apart silently.
 
 — END OF PRD —

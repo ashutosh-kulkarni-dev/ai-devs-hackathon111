@@ -7,3 +7,6 @@ requests==2.32.3
 qdrant-client==1.9.1
 psycopg2-binary==2.9.9
 numpy==1.26.4
+
+# dev/test only
+pytest==8.3.2

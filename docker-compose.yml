@@ -58,7 +58,9 @@ services:
       - postgres
 
   api-gateway:
-    build: ./services/api_gateway
+    build:
+      context: .
+      dockerfile: services/api_gateway/Dockerfile
     container_name: fi-api-gateway
     env_file: .env
     environment:
@@ -75,7 +77,9 @@ services:
       - pii-masking
 
   orchestrator:
-    build: ./services/orchestrator
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
     container_name: fi-orchestrator
     env_file: .env
     environment:
@@ -137,6 +141,10 @@ services:
       - pubsub-emulator
       - audit-log
 
+  # Analyst dashboard for THIS stack (talks to api-gateway above). Not a dead
+  # duplicate of web/'s dashboard -- web/ is a separate, self-contained
+  # Vercel deployment with its own backend; see README.md "Two ways to run
+  # this" and web/README.md "Known divergences".
   frontend:
     build: ./frontend
     container_name: fi-frontend

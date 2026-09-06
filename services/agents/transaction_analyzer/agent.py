@@ -3,8 +3,9 @@ Transaction Analyzer Agent (Google ADK-style worker).
 
 Subscribes to transaction-analyzer-tasks, pulls 12-month transaction history
 for the account from Postgres (Cloud Spanner substitute), computes objective
-behavioral statistics, then asks Gemini to reason over those statistics
-(never over raw free text) to produce a schema-enforced AnomalyReport.
+behavioral statistics, then asks Groq (openai/gpt-oss-20b) to reason over
+those statistics (never over raw free text) to produce a schema-enforced
+AnomalyReport.
 """
 import json
 import os

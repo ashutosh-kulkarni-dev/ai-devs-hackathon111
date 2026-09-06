@@ -2,8 +2,9 @@
 KYC Retriever Agent (Google ADK-style worker).
 
 Subscribes to kyc-retriever-tasks, pulls the customer's KYC record + runs a
-Sanctions/PEP screen, synthesizes a schema-enforced KYCSummary via Gemini,
-publishes to kyc-retriever-results, and writes an audit log entry.
+Sanctions/PEP screen, synthesizes a schema-enforced KYCSummary via Groq
+(openai/gpt-oss-20b), publishes to kyc-retriever-results, and writes an
+audit log entry.
 
 Input record must already be PII-masked by the API Gateway before it
 reaches this agent -- this worker never receives raw customer PII.

@@ -12,7 +12,6 @@ re-implemented here): TLS 1.3 termination at a Cloud Run/Envoy ingress,
 AES-256-at-rest on Postgres/GCS, and full IAM-based auth in place of the
 placeholder API-key check below.
 """
-import json
 import os
 import sys
 import uuid
@@ -92,13 +91,23 @@ def submit_alert(alert: FlaggedAlert, x_api_key: Optional[str] = Header(default=
     correlation_id = case_id
 
     # PII masking pass on any free-text narrative before it ever reaches an agent/LLM.
+    # Fail CLOSED: if masking can't run, reject the alert rather than forward
+    # unmasked PII downstream. A masking outage must never look like success.
     masked_narrative = alert.narrative
     if alert.narrative:
         try:
             resp = requests.post(f"{PII_MASKING_URL}/mask", json={"text": alert.narrative}, timeout=10)
+            resp.raise_for_status()
             masked_narrative = resp.json()["masked_text"]
         except Exception as exc:  # noqa: BLE001
-            print(f"[api-gateway] PII masking unavailable, proceeding with caution: {exc}", flush=True)
+            log_event(correlation_id, "api_gateway", "ALERT_REJECTED_MASKING_UNAVAILABLE", {
+                "case_id": case_id, "customer_id": alert.customer_id, "account_id": alert.account_id,
+                "error": str(exc),
+            })
+            raise HTTPException(
+                status_code=503,
+                detail="PII masking service unavailable; alert rejected rather than forwarded unmasked.",
+            )
 
     log_event(correlation_id, "api_gateway", "ALERT_RECEIVED", {
         "case_id": case_id, "customer_id": alert.customer_id, "account_id": alert.account_id,
