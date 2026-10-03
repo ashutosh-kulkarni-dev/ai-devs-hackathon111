@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
 
   const { result: report, tokens: reportTokens } = await reportGenerator(
     caseId,
+    maskedText,
     results.kyc_summary || stubKyc,
     results.anomaly_report || stubAnomaly,
     results.case_search_result || stubSearch

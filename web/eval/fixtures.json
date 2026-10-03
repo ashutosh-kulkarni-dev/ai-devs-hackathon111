@@ -1,0 +1,123 @@
+{
+  "note": "Ground-truth labels for pipeline evaluation. Each entry is a flagged alert and the verdict a human analyst would reach, with the specific signals that drove it. Running `npm run eval` submits each alert through POST /api/alerts and compares the model's recommended_action to expected_action.",
+  "scoring_rules": {
+    "match": "model's recommended_action equals expected_action",
+    "close": "both are in the escalation group {ESCALATE_SAR, CONFIRM_FRAUD, MANUAL_REVIEW} or both in {CLEAR_FALSE_POSITIVE}",
+    "miss": "neither of the above"
+  },
+  "cases": [
+    {
+      "id": "EVAL-001",
+      "customer_id": "CUST-1000", "account_id": "ACC-5000",
+      "flagged_transaction_id": "TXN-000451",
+      "narrative": "High-value wire to an offshore holding entity in a high-risk geography, first occurrence in this account's 12-month history.",
+      "expected_action": "ESCALATE_SAR",
+      "rationale": "First-time offshore wire + high-risk geography is a classic SAR trigger."
+    },
+    {
+      "id": "EVAL-002",
+      "customer_id": "CUST-1004", "account_id": "ACC-5004",
+      "flagged_transaction_id": "TXN-000452",
+      "narrative": "Three transfers just under the $10,000 reporting threshold within 48 hours, consistent with structuring to evade CTR filing.",
+      "expected_action": "ESCALATE_SAR",
+      "rationale": "Structuring is a per-se SAR-reportable BSA violation."
+    },
+    {
+      "id": "EVAL-003",
+      "customer_id": "CUST-1006", "account_id": "ACC-5006",
+      "flagged_transaction_id": "TXN-000468",
+      "narrative": "Account received 14 inbound transfers from 9 different senders totalling $82,000 over 3 days, then forwarded the full balance to a single beneficiary within hours — classic money mule behavior.",
+      "expected_action": "ESCALATE_SAR",
+      "rationale": "Fan-in/fan-out with rapid pass-through is the textbook mule pattern."
+    },
+    {
+      "id": "EVAL-004",
+      "customer_id": "CUST-1005", "account_id": "ACC-5005",
+      "flagged_transaction_id": "TXN-000461",
+      "narrative": "Login from unrecognized device in a foreign country followed immediately by a $47,000 outbound wire. Customer has never transacted internationally before.",
+      "expected_action": "CONFIRM_FRAUD",
+      "rationale": "Device + geo anomaly immediately before a large outbound wire with no prior international activity = account takeover."
+    },
+    {
+      "id": "EVAL-005",
+      "customer_id": "CUST-1008", "account_id": "ACC-5008",
+      "flagged_transaction_id": "TXN-000489",
+      "narrative": "Finance team wired $138,000 to a vendor bank account added 48 hours prior following a spoofed CEO email requesting urgent payment. The beneficiary account was opened 6 days ago.",
+      "expected_action": "CONFIRM_FRAUD",
+      "rationale": "BEC: urgency + newly-added payee + newly-opened recipient account."
+    },
+    {
+      "id": "EVAL-006",
+      "customer_id": "CUST-1007", "account_id": "ACC-5007",
+      "flagged_transaction_id": "TXN-000477",
+      "narrative": "12 card-not-present transactions ranging $1–$5 across different merchants in a 20-minute window — consistent with automated card testing before high-value exploitation.",
+      "expected_action": "CONFIRM_FRAUD",
+      "rationale": "Automated low-value probing is a well-known fraud precursor; freeze card now."
+    },
+    {
+      "id": "EVAL-007",
+      "customer_id": "CUST-1010", "account_id": "ACC-5010",
+      "flagged_transaction_id": "TXN-000501",
+      "narrative": "Elderly customer (82) made seven ATM cash withdrawals totalling $34,000 over 10 days following contact with an individual claiming to be a lottery official demanding taxes be paid upfront.",
+      "expected_action": "ESCALATE_SAR",
+      "rationale": "Advance-fee elder scam; SAR category required even if customer disputes."
+    },
+    {
+      "id": "EVAL-008",
+      "customer_id": "CUST-1009", "account_id": "ACC-5009",
+      "flagged_transaction_id": "TXN-000453",
+      "narrative": "Sudden high-value P2P transfer to a brand-new, unknown payee, deviating sharply from established spending pattern.",
+      "expected_action": "MANUAL_REVIEW",
+      "rationale": "Suspicious but a single data point — needs analyst to call the customer before acting."
+    },
+    {
+      "id": "EVAL-009",
+      "customer_id": "CUST-1001", "account_id": "ACC-5001",
+      "narrative": "Monthly $400 recurring charge from a familiar streaming merchant the customer has paid for 18 consecutive months. Alert fired due to a routine category-level rule tweak.",
+      "expected_action": "CLEAR_FALSE_POSITIVE",
+      "rationale": "Stable recurring charge; rule-tuning noise, not fraud."
+    },
+    {
+      "id": "EVAL-010",
+      "customer_id": "CUST-1002", "account_id": "ACC-5002",
+      "narrative": "Customer travelled abroad (notified the bank in advance) and used their debit card for restaurant and transport charges totalling $380 across 4 days.",
+      "expected_action": "CLEAR_FALSE_POSITIVE",
+      "rationale": "Travel notice on file + spending profile consistent with travel = benign."
+    },
+    {
+      "id": "EVAL-011",
+      "customer_id": "CUST-1003", "account_id": "ACC-5003",
+      "narrative": "Customer bought a $2,100 laptop at a reputable electronics retailer during a Black Friday sale. Amount is above customer's rolling average but merchant category and seasonality are consistent.",
+      "expected_action": "CLEAR_FALSE_POSITIVE",
+      "rationale": "Large purchase alone isn't fraud; seasonality + merchant trust support clearing."
+    },
+    {
+      "id": "EVAL-012",
+      "customer_id": "CUST-1011", "account_id": "ACC-5011",
+      "narrative": "Business account received a $62,000 wire from a long-standing counterparty (54 prior transfers over 3 years from same remitter). Amount is in-pattern for quarterly settlement.",
+      "expected_action": "CLEAR_FALSE_POSITIVE",
+      "rationale": "Established counterparty, in-pattern amount, legitimate business cadence."
+    },
+    {
+      "id": "EVAL-013",
+      "customer_id": "CUST-1012", "account_id": "ACC-5012",
+      "narrative": "Single $9,500 ATM withdrawal — the only large cash activity on this account in the past year. No supporting narrative or context.",
+      "expected_action": "MANUAL_REVIEW",
+      "rationale": "Just under threshold is suspicious but one event with no corroborating signal needs human judgement."
+    },
+    {
+      "id": "EVAL-014",
+      "customer_id": "CUST-1013", "account_id": "ACC-5013",
+      "narrative": "Customer added a new beneficiary 3 months ago and has sent 5 small payments ($50–$200) to it since without issue. Current flagged payment is $800 to the same beneficiary.",
+      "expected_action": "CLEAR_FALSE_POSITIVE",
+      "rationale": "Established payment history to this beneficiary; escalating amount but still modest."
+    },
+    {
+      "id": "EVAL-015",
+      "customer_id": "CUST-1014", "account_id": "ACC-5014",
+      "narrative": "Dormant account (no activity for 14 months) suddenly initiated 6 transfers totalling $28,000 to 6 different international recipients within one evening.",
+      "expected_action": "ESCALATE_SAR",
+      "rationale": "Dormant-account reactivation with immediate international fan-out is a strong SAR signal."
+    }
+  ]
+}

@@ -1,23 +1,34 @@
 /**
  * Storage layer for the Vercel deployment.
  *
- * Vercel serverless functions are stateless and short-lived, so unlike the
- * docker-compose reference architecture (Postgres + Qdrant as separate
- * long-running containers), this deployment needs a persistence layer that
- * works from any function invocation. It uses Vercel Postgres
- * (@vercel/postgres, powered by Neon) when POSTGRES_URL is set -- add it
- * from the Vercel dashboard: Storage tab -> Create Database -> Postgres,
- * which auto-injects the env var, no manual setup.
+ * Uses @neondatabase/serverless (the current client — the older
+ * @vercel/postgres package was deprecated in favour of a direct Neon
+ * integration). Set POSTGRES_URL (or DATABASE_URL) from the Vercel
+ * dashboard: Storage tab -> Create Database -> Neon.
  *
- * If POSTGRES_URL is absent (e.g. local `next dev` without configuring
- * storage), falls back to a per-process in-memory store. That's fine for
- * a quick local click-through but will NOT persist across serverless
- * invocations in a real Vercel deployment -- configure Postgres before
- * sharing a public demo link.
+ * If no connection string is present (e.g. local `next dev` without
+ * configuring storage), falls back to a per-process in-memory store.
+ * That's fine for a quick local click-through but will NOT persist
+ * across serverless invocations in a real Vercel deployment -- configure
+ * Neon before sharing a public demo link.
  */
-import { sql } from "@vercel/postgres";
+import { neon } from "@neondatabase/serverless";
 
-export const HAS_POSTGRES = !!process.env.POSTGRES_URL;
+const CONN = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+export const HAS_POSTGRES = !!CONN;
+
+// `fullResults: true` makes queries resolve to `{ rows, rowCount, ... }`,
+// matching the deprecated @vercel/postgres shape so existing call sites
+// (`.rows`, `.rowCount`) keep working.
+// Lazy so an unconfigured deployment doesn't crash at module load.
+let _sql: ReturnType<typeof neon> | null = null;
+function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<any> {
+  if (!_sql) {
+    if (!CONN) throw new Error("POSTGRES_URL / DATABASE_URL not set");
+    _sql = neon(CONN, { fullResults: true });
+  }
+  return (_sql as any)(strings, ...values);
+}
 
 // ---- in-memory fallback (dev only, single-process) ----
 // Stored on globalThis so all Next.js route-handler module instances share

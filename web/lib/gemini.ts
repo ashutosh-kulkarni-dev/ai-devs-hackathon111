@@ -62,31 +62,45 @@ export async function generateStructured<T>(
     `${systemPrompt}\n\nRespond with ONLY a single valid JSON object. ` +
     `No markdown, no code fences, no commentary.`;
 
+  // Retry on 429 (TPM/RPM limits). Groq's error message carries a
+  // "Please try again in Xs" hint; we respect it (capped). Bounded retries
+  // so a sustained outage doesn't hang the request indefinitely.
+  const MAX_ATTEMPTS = 4;
+  const RETRY_CAP_MS = 20_000;
+  let json: any = null;
+  let resp: Response | null = null;
   try {
-    const resp = await fetch(GROQ_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: groqModel,
-        messages: [
-          { role: "system", content: systemWithJson },
-          { role: "user", content: userPrompt },
-        ],
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-      }),
-    });
-    const json = await resp.json();
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      resp = await fetch(GROQ_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: groqModel,
+          messages: [
+            { role: "system", content: systemWithJson },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+        }),
+      });
+      json = await resp.json();
+      if (resp.ok) break;
+      if (resp.status !== 429 || attempt === MAX_ATTEMPTS) break;
+      const hint = String(json?.error?.message || "").match(/try again in ([\d.]+)s/i);
+      const retryHeader = resp.headers.get("retry-after");
+      const waitSec = hint ? Number(hint[1]) : retryHeader ? Number(retryHeader) : 2 * attempt;
+      const waitMs = Math.min(RETRY_CAP_MS, Math.max(500, waitSec * 1000 + 250));
+      console.warn(`[groq] ${groqModel} 429, waiting ${waitMs}ms (attempt ${attempt}/${MAX_ATTEMPTS})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
 
-    if (!resp.ok) {
-      // Loud signal in server logs so a bad/expired/wrong-format key or a
-      // deprecated model is obvious during local testing, rather than
-      // silently falling back to mock output and looking like it "worked".
+    if (!resp || !resp.ok) {
       console.error(
-        `[groq] ${groqModel} request failed: HTTP ${resp.status} ${resp.statusText}. ` +
+        `[groq] ${groqModel} request failed: HTTP ${resp?.status} ${resp?.statusText}. ` +
           `Response: ${JSON.stringify(json).slice(0, 500)}. ` +
           `Falling back to deterministic mock output for this agent.`
       );

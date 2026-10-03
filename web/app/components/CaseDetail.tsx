@@ -206,6 +206,16 @@ export default function CaseDetail({ caseId, onResolved }: { caseId: string; onR
                   marginTop: "6px", fontSize: "10px", fontWeight: 700,
                   letterSpacing: "0.1em", color: risk!.color,
                 }}>{risk!.label} RISK</div>
+                <div
+                  title="This is the raw LLM-reported score, not a statistically calibrated probability. Treat the risk tier (LOW/MEDIUM/HIGH/CRITICAL) as the operative signal."
+                  style={{
+                    marginTop: "6px", fontSize: "9px",
+                    color: "var(--muted)", fontStyle: "italic",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  model-reported · not calibrated
+                </div>
               </div>
 
               {/* Recommended action */}
