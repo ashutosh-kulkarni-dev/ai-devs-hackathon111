@@ -11,3 +11,6 @@ pydantic==2.7.4
 google-cloud-pubsub==2.21.5
 qdrant-client==1.9.1
 numpy==1.26.4
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp
