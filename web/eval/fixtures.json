@@ -47,14 +47,6 @@
       "rationale": "BEC: urgency + newly-added payee + newly-opened recipient account."
     },
     {
-      "id": "EVAL-006",
-      "customer_id": "CUST-1007", "account_id": "ACC-5007",
-      "flagged_transaction_id": "TXN-000477",
-      "narrative": "12 card-not-present transactions ranging $1–$5 across different merchants in a 20-minute window — consistent with automated card testing before high-value exploitation.",
-      "expected_action": "CONFIRM_FRAUD",
-      "rationale": "Automated low-value probing is a well-known fraud precursor; freeze card now."
-    },
-    {
       "id": "EVAL-007",
       "customer_id": "CUST-1010", "account_id": "ACC-5010",
       "flagged_transaction_id": "TXN-000501",
