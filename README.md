@@ -1,99 +1,138 @@
-# AI Fraud & Anomaly Investigation Agent (BFSI)
+# AI Fraud Investigation — Hackathon Prototype
 
-An AI-native multi-agent system that investigates flagged bank transactions end to end: retrieves similar historical fraud cases, verifies KYC and sanctions screening, analyzes transaction behavior, reasons about fraud probability, and generates a cited, analyst-ready investigation report.
+A hackathon-built prototype exploring whether an LLM-orchestrated multi-agent pipeline can replicate the "detective work" a bank fraud analyst does across KYC, sanctions, transaction patterns, and historical cases — turning a 30–45 min manual investigation into **under 2 minutes of human review**.
 
-Built for the [track brief]: automate the "detective work" fraud analysts currently do manually across disconnected systems, cutting a 30-45 minute investigation down to under 2 minutes of human review.
+> **[→ Live demo](https://ai-devs-hackathon111.vercel.app)** · click a preset alert, watch 4 agents run, read the synthesized report. Runs in **DEMO MODE** (deterministic mock agent output) unless `GROQ_API_KEY` is configured — the UI shows a banner so visitors know which they're seeing.
 
-This is the Stage 2 submission — a running system, not just a design. See `docs/PRD.md` for the full requirements doc (with FR/NFR IDs and a traceability matrix) and `docs/architecture.md` for the architecture diagram and design rationale.
+<!-- TODO(ashutosh): drop a 10–15s GIF here showing: pick alert → 4 agents run → report → verdict.
+     Record with ScreenToGif / Kap, keep <2MB, commit to docs/demo.gif, then:
+     ![demo](docs/demo.gif) -->
 
-## Two ways to run this
+---
 
-This repo ships two runnable versions of the same design, for two different purposes:
+## What this is (and isn't)
 
-1. **`web/` — the live demo, deployable to Vercel in a few clicks.** A single Next.js app collapsing the API Gateway, PII masking, orchestrator, and all four agents into one project, using Vercel's built-in Postgres storage. This is what you hand to judges as a clickable URL. See `web/README.md` for one-click deploy steps.
-2. **`services/` + `docker-compose.yml` — the full reference architecture.** The mandatory hackathon stack (Google ADK, Qdrant, Lyzr) wired together with real async Pub/Sub messaging, a standalone Qdrant vector DB, and Microsoft Presidio PII masking. This is the architecture described in `docs/architecture.md` and is what demonstrates production-grade design depth.
+**It is:** a working end-to-end prototype that demonstrates multi-service orchestration, structured LLM output under schema validation, vector search, a tamper-detectable change log, and a dashboard UX for an analyst-in-the-loop workflow. Shipped live on Vercel.
 
-Both run the identical CRISPE prompts, output schemas, and agent logic (`docs/prompts/`) — the Vercel version substitutes serverless-friendly infrastructure (concurrent function calls instead of Pub/Sub, request-time cosine similarity instead of a Qdrant container, regex PII masking instead of Presidio) where a container-based service doesn't fit a stateless function runtime. Every substitution is listed and justified in `web/README.md`.
+**It isn't:** a production BFSI system. Fraud scores are not statistically calibrated. PII masking is regex-based. Sanctions screening uses a fixture file, not a licensed vendor feed. The "tamper-evident audit log" is a hash chain that's integrity-checkable from the same process that writes it — real tamper-evidence needs external anchoring (which would be a one-afternoon add via a daily hash to a public gist, and is tracked as a TODO).
 
-## What changed since Stage 1
+Treat it as a portfolio-grade demonstration of design judgement + plumbing, not a bank-ready product.
 
-Stage 1 scored "Strongly Aligned" with the track but flagged four gaps. Each is addressed here, with a pointer to the exact evidence:
+## How it works
 
-| Stage 1 finding | Fix | Where |
-| :--- | :--- | :--- |
-| Synchronous orchestration → tight coupling, latency risk | Orchestrator and agents communicate only via Pub/Sub topics (emulator locally, same SDK as production Cloud Pub/Sub) | `services/orchestrator/`, `docs/architecture.md` |
-| No production-grade prompt specs (CRISPE, output schemas, few-shot) | CRISPE prompt appendix per agent, enforced at runtime via Gemini `response_schema` | `docs/prompts/*.md`, `services/agents/*/agent.py` |
-| No explicit security controls (encryption, input validation) | Pydantic schema validation at every boundary; PII masking with a scripted leak test; security control table split into "implemented" vs "documented production target" | `docs/PRD.md` §7 |
-| No LLM observability (OpenTelemetry, correlation IDs) | OpenTelemetry spans around every agent/orchestrator call, tagged with the case's correlation ID; token + latency tracked per LLM call | `services/agents/common/tracing.py` |
+1. Analyst submits a flagged alert (`POST /api/alerts`) or clicks a preset in the sidebar.
+2. PII is masked, then **four agents run** (3 in parallel, then a synthesizer):
+   - **KYC Retriever** — identity + sanctions/PEP screen.
+   - **Transaction Analyzer** — anomaly detection against account history.
+   - **Fraud Case Search** — semantic search over past resolved cases (Qdrant).
+   - **Report Generator** — synthesizes the three into a schema-enforced report with evidence citations and a risk tier.
+3. Every hop is written to a hash-chained log; `GET /api/audit/verify` recomputes the chain and names the exact `seq` of any tampered row.
+4. Analyst confirms `CONFIRMED_FRAUD` or clears as `FALSE_POSITIVE`. The resolution is embedded + written back to Qdrant so future similar alerts match it.
 
-## Architecture at a glance
+## Stack
 
-Flagged alert → API Gateway (input validation) → PII Masking → Pub/Sub → Lyzr Orchestrator (Gemini 2.5 Pro) fans out to three parallel agents (KYC Retriever, Transaction Analyzer, Fraud Case Search — all Google ADK + Gemini 2.5 Flash) → Report Generator (Gemini 2.5 Pro) synthesizes a schema-enforced, evidence-cited report → Analyst Dashboard (scroll-gated verdict) → confirmed/false-positive verdict is embedded and written back into Qdrant's fraud case memory.
+- **Next.js 14** (App Router) + React 18 + TypeScript — deployed on Vercel.
+- **Groq** (`openai/gpt-oss-20b` for agents, `openai/gpt-oss-120b` for synthesizer) with JSON mode + Zod validation.
+- **Lyzr** — orchestrator's dispatch-planning brain (optional; local fallback invokes all agents).
+- **Qdrant** — vector store for the fraud-case memory.
+- **Neon Postgres** (`@neondatabase/serverless`) — cases + audit log + resolved-case metadata. In-memory fallback for local dev.
+- **Vitest** — unit + integration tests for auth, DB lifecycle, and audit chain.
 
-Every hop is logged to a hash-chained, tamper-evident audit log that you can verify live (`GET /audit/verify`) — see `docs/architecture.md` for the full diagram and the local-vs-production substitution table (Postgres↔Spanner, hashed log↔BigQuery+CMEK, mock Sanctions API↔licensed vendor, etc.).
-
-Mandatory hackathon stack — **Google ADK, Qdrant, Lyzr** — all present and load-bearing, not decorative:
-- **Google ADK**: all four agents.
-- **Qdrant**: fraud case memory, read by the search agent and written back by the dashboard.
-- **Lyzr**: the orchestrator's dispatch-planning brain.
+A parallel `services/` + `docker-compose.yml` reference stack explores the same design with real async Pub/Sub, Google ADK agents, and Microsoft Presidio PII masking. It's not what's deployed — think of it as the "full async architecture" exploration that fed into the Vercel build.
 
 ## Quickstart
 
-Requires Docker + Docker Compose, and Python 3.11+ on the host for the seed/demo scripts.
+### Run the Vercel app locally
 
 ```bash
-cp .env.example .env
-# Optionally fill in GROQ_API_KEY and LYZR_API_KEY in .env for live LLM calls.
-# Leave them blank and the whole pipeline still runs end-to-end in
-# deterministic DEMO_MODE (every agent falls back to schema-matching mock output).
-
-./scripts/run_demo_case.sh
+cd web
+cp .env.example .env.local      # leave keys blank for DEMO MODE
+npm install
+npm run dev                      # http://localhost:3000
 ```
 
-This brings up the full stack (Qdrant, Postgres, Pub/Sub emulator, mock Sanctions API, PII masking, audit log, API gateway, orchestrator, all four agents, and the dashboard), seeds transaction/KYC/historical fraud case fixtures, submits one flagged alert, and prints the resulting investigation report.
+Add `GROQ_API_KEY` (from https://console.groq.com) to `.env.local` for live LLM calls; everything else is optional.
 
-Then open the dashboard: **http://localhost:5173**
+### Run the evaluation harness
 
-To submit more cases interactively, use the "Submit a flagged transaction alert" form in the dashboard, or:
+With `npm run dev` running in another terminal:
 
 ```bash
-curl -X POST http://localhost:8000/alerts \
-  -H "X-API-Key: demo-key-change-me" -H "Content-Type: application/json" \
-  -d '{"customer_id":"CUST-1004","account_id":"ACC-5004","flagged_transaction_id":"TXN-000452",
-       "narrative":"Three transfers just under the $10,000 threshold within 48 hours."}'
+cd web
+npm run eval                     # 15 ground-truth cases, prints a confusion matrix
+# BASE_URL=https://ai-devs-hackathon111.vercel.app npm run eval  # evaluate the live site
 ```
 
-Check audit log integrity live: `curl http://localhost:8000/audit/verify` (or the "Verify Audit Log Integrity" button in the dashboard header) — this recomputes the hash chain and will name the exact tampered row if you edit an entry directly in Postgres.
+Fixtures live in [`web/eval/fixtures.json`](web/eval/fixtures.json). Each case has an `expected_action` labelled by hand with the rationale an analyst would use. The runner scores each as `match` / `close` (same escalation group) / `miss` and exits non-zero below 70% accuracy, so it can gate CI.
 
-## Demo mode vs. live mode
+### Run the tests
 
-Every LLM call and embedding call checks for `GROQ_API_KEY`; every Lyzr orchestration decision checks for `LYZR_API_KEY`. If absent, the system runs in `DEMO_MODE`: deterministic, schema-matching mock responses stand in, so the entire async multi-agent pipeline — Pub/Sub dispatch, parallel agent execution, join logic, report synthesis, audit logging, dashboard — runs and is fully demonstrable without any credentials. Supplying the keys in `.env` switches every agent to real Groq calls and real Lyzr orchestration with no code changes.
+```bash
+cd web
+npm test                         # 10 vitest tests: auth, rate limit, terminal-state guard, audit chain
+```
+
+### Run the full reference stack (optional)
+
+```bash
+cp .env.example .env             # optional: GROQ_API_KEY / LYZR_API_KEY
+./scripts/run_demo_case.sh       # brings up docker-compose, seeds fixtures, submits a demo alert
+```
+Dashboard at <http://localhost:5173>, API at <http://localhost:8000>.
 
 ## Repository layout
 
 ```
-docs/                  PRD (with FR/NFR IDs + traceability matrix), architecture doc, CRISPE prompt specs
-services/
-  api_gateway/          FastAPI entry point, input validation, verdict + write-back endpoints
-  pii_masking/           Presidio-based PII redaction service
-  audit_log/             Hash-chained immutable audit log
-  mock_sanctions_api/    Fixture-backed Sanctions/PEP screening API
-  orchestrator/          Lyzr-backed dispatch planner + Pub/Sub fan-out/fan-in
-  agents/
-    common/               Shared LLM client, schemas, Pub/Sub client, tracing, embeddings
-    kyc_retriever/        Google ADK agent
-    transaction_analyzer/ Google ADK agent
-    fraud_case_search/    Google ADK agent
-    report_generator/     Google ADK agent
-frontend/               React + Tailwind + TypeScript analyst dashboard
-fixtures/               Synthetic transactions, KYC docs, sanctions watchlist, historical fraud cases
-scripts/                Seed scripts + one-command demo runner
+web/                 Next.js app deployed to Vercel (the live demo — primary deliverable)
+  app/api/             Serverless routes: /alerts, /cases, /audit/verify, /config
+  app/components/      Analyst dashboard UI
+  lib/                 Agents, DB (Neon + in-memory fallback), Qdrant, PII mask, auth
+  eval/                Ground-truth fixtures + evaluation runner
+  tests/               Vitest tests
+services/            Reference stack (FastAPI + Pub/Sub + Google ADK) — not deployed
+docker-compose.yml   Brings up services/ + Qdrant + Postgres + Presidio
+frontend/            Vite/React dashboard for the services/ stack
+docs/                PRD (FR/NFR traceability), architecture doc, CRISPE prompts
+fixtures/            Synthetic customers, transactions, KYC docs, past fraud cases
 ```
 
-## Known limitations / honest scoping
+## Evaluation results
 
-This is a hackathon build, not a bank's production deployment. What's real: the full async multi-agent pipeline, Qdrant hybrid search, schema-enforced LLM outputs, PII masking, the hash-chained audit log, OpenTelemetry tracing, and the dashboard. What's substituted for speed and demo reliability: Cloud Spanner → Postgres, BigQuery → hash-chained Postgres, a real Sanctions/PEP vendor → a fixture-backed mock with the same API contract, and full GCP IAM → an API-key stub. Every substitution is listed with its production target in `docs/architecture.md` and `docs/PRD.md` §7 — nothing here is hidden or overstated.
+The eval harness ran all 15 ground-truth cases through the live pipeline (Groq `gpt-oss-120b` for synthesis, `gpt-oss-20b` for agents). Three iterations:
+
+| Prompt version | Strict (exact match) | Lenient (match + close group) | Dominant failure mode |
+|---|---|---|---|
+| Original — narrative dropped at synthesizer | 46.7% | 53.3% | Under-escalation when fixtures didn't match customer_id |
+| **+ pass narrative to synthesizer + fraud-pattern cues** (locked in) | **46.7%** | **66.7%** | Over-escalates some benign cases |
+| + explicit CLEAR cues (reverted) | 60.0% | 60.0% | Over-corrected; started missing real fraud |
+
+What this surfaced:
+- A real design bug — the Report Generator never saw the raw alert narrative, only the three agents' structured outputs. When fixtures returned thin data, "insufficient evidence → clear" fired on obvious fraud. **Fixed** by passing the masked narrative through.
+- Classic prompt-tuning whack-a-mole on 15 cases — "fix one failure mode, create another." The eval set is too small to tune to without overfitting; the next step is a 100+ case set with a validation holdout.
+- The pipeline is still **better at catching fraud than at clearing benign activity**. Operationally that's the preferred asymmetry (missing fraud is worse than extra analyst review), but it's a measured limitation, not an unmeasured one.
+
+Run it yourself: `npm run eval` from `web/` (needs the dev server running and a `GROQ_API_KEY` in `.env.local`). Pacing (`EVAL_SLEEP_MS`) stays under Groq's free-tier 8000 TPM; daily 200K TPD is a harder ceiling.
+
+## Honest scoping
+
+| Area | What's real | What's substituted / limited |
+|---|---|---|
+| Agents | Real parallel fan-out, schema-enforced outputs | Fixtures stand in for a real transaction store / KYC vault |
+| Fraud score | Risk tier (LOW/MED/HIGH/CRITICAL) is directly actionable | Numeric probability is model-reported, **not calibrated** — labelled as such in the UI |
+| PII masking (web/) | Regex: email, phone, SSN, card | Doesn't catch names (services/ stack uses Presidio) |
+| Sanctions screening | Dice-coefficient name matching with HIT/PARTIAL/NO_HIT thresholds | Fixture watchlist, not a licensed vendor feed |
+| Audit log | Hash-chained, verifiable, `/verify` names any tampered row | Verify endpoint runs in the same trust boundary as writes; real tamper-evidence needs external anchoring (planned) |
+| Auth | Same-origin check + optional X-API-Key for external callers, per-IP rate limit | Not OAuth/IAM; closed by default when `API_GATEWAY_KEY` is unset |
+| Persistence | Neon Postgres on live; in-memory for local | — |
+
+## Follow-ups (not done in this pass)
+
+- **Larger eval set** — 15 cases is a diagnostic, not a benchmark. The next step is 100+ cases with an explicit train / validation / test split so prompt tuning stops being overfitting.
+- **"Stability signal" extractor** — a small pre-processing step that pulls established-pattern cues ("18 months", "54 prior", "notified in advance") out of the narrative into a structured field, so the synthesizer stops relying on free-text pattern-matching for the single thing it's weakest at.
+- **External anchoring for the audit chain** (daily hash → public gist) to make tamper-evidence hold outside the write-path's trust boundary.
+- **Replace inline styles in `web/app/components/*` with Tailwind** — Tailwind is already configured; the dashboard components still use inline styles for historical reasons.
+- **Prompt-injection hardening** — narrative flows into prompts after only regex masking; needs instruction-boundary wrapping.
 
 ## License
 
-Built for a hackathon submission; no license restrictions on reuse for evaluation purposes.
+MIT — see [LICENSE](LICENSE).

@@ -22,7 +22,7 @@
                                               ▼
                               ┌───────────────────────────────────┐
                               │   Investigation Orchestrator        │
-                              │   (Lyzr + Gemini 2.5 Pro)            │
+                              │   (Lyzr Studio orchestrator agent)   │
                               │   -> decides dispatch plan           │
                               └───┬───────────┬───────────┬─────────┘
                        publish    │           │           │  publish
@@ -32,7 +32,7 @@
                      ┌─────────────┐ ┌─────────────────┐ ┌────────────────────┐
                      │ KYC Retriever│ │Transaction       │ │ Fraud Case Search   │
                      │ Agent (ADK,  │ │Analyzer Agent    │ │ Agent (ADK,          │
-                     │ Gemini Flash)│ │(ADK, Gemini Flash)│ │ Gemini Flash)        │
+                     │ Groq 20b)    │ │(ADK, Groq 20b)   │ │ Groq 20b)            │
                      │ -> Sanctions │ │ -> Postgres       │ │ -> Qdrant hybrid     │
                      │   & PEP API  │ │   (txn history)   │ │   search             │
                      └──────┬───────┘ └────────┬──────────┘ └──────────┬──────────┘
@@ -45,7 +45,7 @@
                                                  ▼           report-generator-tasks
                                     ┌─────────────────────────┐
                                     │   Report Generator Agent  │
-                                    │   (ADK, Gemini 2.5 Pro)    │
+                                    │   (ADK, Groq 120b)          │
                                     │   -> schema-enforced,       │
                                     │      evidence-cited report  │
                                     └───────────┬─────────────┘
@@ -82,6 +82,17 @@ In this build, the orchestrator never calls a worker agent's endpoint directly a
 - Each agent is an independent long-running subscriber; it can be scaled, restarted, or fail independently without blocking the others or the orchestrator.
 - Results flow back over their own topics; the orchestrator's fan-in logic is just three background threads updating shared state, not a blocking wait on three RPCs.
 - Because this uses the real `google-cloud-pubsub` SDK against a local emulator, moving to production Google Cloud Pub/Sub is a configuration change (drop `PUBSUB_EMULATOR_HOST`, add real project credentials) — no code changes to any publisher or subscriber.
+
+## Delivery guarantees: at-least-once, dead-letter, join timeout
+
+Async fan-out is only as trustworthy as what happens when a hop fails partway through. This build's contract, end to end:
+
+- **At-least-once delivery, not "ack and hope."** `pubsub_client.py`'s worker loop only acknowledges a message after its handler returns successfully. A handler that raises leaves the message un-acked, so the emulator (and production Pub/Sub, same SDK) redelivers it — a crashed agent mid-handler never silently drops a case.
+- **Dead-letter after N attempts, not an infinite retry loop.** Each topic has a paired `<topic>-dead-letter` topic. A message that fails its handler `PUBSUB_MAX_DELIVERY_ATTEMPTS` times (default 5) is published there with the original payload and the exception, then acked so it stops looping — a permanently-poisoned message ends up somewhere a human can see it, not stuck retrying forever or silently gone.
+- **Idempotent dispatch.** The orchestrator keys its in-flight case state by `case_id` and treats a redelivered `investigation-tasks` message for a case that's already been dispatched as a no-op, so retries (now real, per the point above) can't clobber results already collected from worker agents.
+- **Join timeout, not a silent hang.** If the Lyzr dispatch plan sends work to fewer than three agents, or one agent's result never arrives, the orchestrator's expected-result-set comes only from the plan it recorded at dispatch time (never guessed), and a background sweeper completes the case anyway after `ORCHESTRATOR_JOIN_TIMEOUT_SECONDS` (default 120s) with whatever results are in, tagged `partial: true` plus the list of missing agents. The case finishes visibly-incomplete instead of waiting forever for a result that will never come.
+
+Every one of these is exercised by a pure-Python test in `services/tests/` (a fake in-memory Pub/Sub broker, no emulator needed) — see `test_pubsub_client.py` and `test_orchestrator_fanin.py`.
 
 ## Why a hash-chained log instead of "BigQuery says immutable" (Stage 1 finding, security)
 

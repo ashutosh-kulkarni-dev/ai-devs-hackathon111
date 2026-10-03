@@ -2,12 +2,14 @@
  * Lightweight regex-based PII masking for the Vercel deployment.
  *
  * The docker-compose reference build uses Microsoft Presidio (+ Google DLP
- * in production) -- a proper NLP-based PII detector. Presidio's Python/NLP
- * dependencies are too heavy for a serverless function bundle, so this
- * deployment substitutes pattern-based redaction for common PII shapes
- * (email, phone, SSN, credit card, generic person-name capitalization).
- * This is a real, working redaction pass -- just a narrower one than
- * Presidio's. Documented as a deliberate substitution in README.md.
+ * in production) -- a proper NLP-based PII detector, including a PERSON-name
+ * model. Presidio's Python/NLP dependencies are too heavy for a serverless
+ * function bundle, so this deployment substitutes pattern-based redaction
+ * for PII shapes a regex can reliably catch: email, phone, SSN, credit card.
+ * It does NOT detect person names -- that gap (and the rest of the known
+ * behavioral divergence from the reference build) is called out in
+ * README.md's "Known divergences" section. This is a real, working
+ * redaction pass for what it does cover, just narrower than Presidio's.
  */
 const PATTERNS: [RegExp, string][] = [
   [/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, "<EMAIL>"],

@@ -29,11 +29,6 @@ const DEMO_CUSTOMERS = [
     tag: "Money Mule", tagColor: "#7c3aed",
   },
   {
-    customer_id: "CUST-1007", account_id: "ACC-5007", flagged_transaction_id: "TXN-000477",
-    narrative: "12 card-not-present transactions ranging $1–$5 across different merchants in a 20-minute window — consistent with automated card testing before high-value exploitation.",
-    tag: "Card Testing", tagColor: "#0891b2",
-  },
-  {
     customer_id: "CUST-1008", account_id: "ACC-5008", flagged_transaction_id: "TXN-000489",
     narrative: "Finance team wired $138,000 to a vendor bank account added 48 hours prior following a spoofed CEO email requesting urgent payment. The beneficiary account was opened 6 days ago.",
     tag: "BEC Fraud", tagColor: "#be123c",

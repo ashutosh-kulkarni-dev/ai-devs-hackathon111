@@ -1,5 +1,6 @@
 """Small helper so every agent/service writes to the audit log the same way."""
 import os
+
 import requests
 
 AUDIT_LOG_URL = os.environ.get("AUDIT_LOG_URL", "http://localhost:8030")

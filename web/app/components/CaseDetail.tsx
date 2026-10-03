@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { CaseDetail as CaseDetailType, api } from "../api-client";
 import StatusBadge from "./StatusBadge";
 
@@ -19,27 +19,48 @@ const ACTION_COLORS: Record<string, { color: string; bg: string }> = {
 
 export default function CaseDetail({ caseId, onResolved }: { caseId: string; onResolved: () => void }) {
   const [detail, setDetail] = useState<CaseDetailType | null>(null);
-  const [scrolledToBottom, setScrolledToBottom] = useState(false);
-  const [demasked, setDemasked] = useState(false);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const evidenceRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
     api.getCase(caseId).then(setDetail).catch(() => setDetail(null));
   };
 
   useEffect(() => {
-    setScrolledToBottom(false);
-    setDemasked(false);
     setNotes("");
+    setDetail(null);
     load();
-    const interval = setInterval(load, 3000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+    // Poll only while a report is still being built AND the tab is visible.
+    // Stops once the case has a report or the analyst resolves it; resumes
+    // when the tab is refocused. Prevents idle tabs from burning serverless
+    // invocations + Postgres queries indefinitely.
+    const tick = () => {
+      setDetail((d) => {
+        const done = d && (d.report_json || d.analyst_verdict);
+        if (done || document.hidden) {
+          if (interval) { clearInterval(interval); interval = null; }
+        }
+        return d;
+      });
+      load();
+    };
+    interval = setInterval(tick, 3000);
+    const onVis = () => {
+      if (document.hidden) {
+        if (interval) { clearInterval(interval); interval = null; }
+      } else if (!interval) {
+        interval = setInterval(tick, 3000);
+        load();
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVis);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseId]);
-
-  const onEvidenceScroll = () => {};
 
   const submitVerdict = async (verdict: string) => {
     setSubmitting(true);
@@ -185,6 +206,16 @@ export default function CaseDetail({ caseId, onResolved }: { caseId: string; onR
                   marginTop: "6px", fontSize: "10px", fontWeight: 700,
                   letterSpacing: "0.1em", color: risk!.color,
                 }}>{risk!.label} RISK</div>
+                <div
+                  title="This is the raw LLM-reported score, not a statistically calibrated probability. Treat the risk tier (LOW/MEDIUM/HIGH/CRITICAL) as the operative signal."
+                  style={{
+                    marginTop: "6px", fontSize: "9px",
+                    color: "var(--muted)", fontStyle: "italic",
+                    letterSpacing: "0.02em",
+                  }}
+                >
+                  model-reported · not calibrated
+                </div>
               </div>
 
               {/* Recommended action */}
@@ -271,8 +302,6 @@ export default function CaseDetail({ caseId, onResolved }: { caseId: string; onR
               </div>
 
               <div
-                ref={evidenceRef}
-                onScroll={onEvidenceScroll}
                 style={{
                   maxHeight: "200px", overflowY: "auto",
                   borderRadius: "10px", border: "1px solid var(--border-dim)",
@@ -302,21 +331,6 @@ export default function CaseDetail({ caseId, onResolved }: { caseId: string; onR
                   );
                 })}
               </div>
-            </div>
-
-            {/* PII demask */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <button
-                onClick={() => { setDemasked(true); api.demask(caseId); }}
-                style={{
-                  fontSize: "12px", color: demasked ? "var(--success)" : "var(--muted-2)",
-                  background: "none", border: "none", cursor: "pointer", padding: 0,
-                  display: "flex", alignItems: "center", gap: "5px",
-                }}
-              >
-                <span>{demasked ? "🔓" : "🔒"}</span>
-                {demasked ? "PII de-masked — access logged to audit trail" : "De-mask customer PII (IAM-gated, logged)"}
-              </button>
             </div>
 
             {/* Verdict / Completion */}

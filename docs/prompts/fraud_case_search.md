@@ -1,6 +1,6 @@
 # CRISPE Prompt Spec — Fraud Case Search Agent
 
-Model: Gemini 2.5 Flash (via Google ADK) · Output schema: `FraudCaseSearchResult` (services/agents/common/schemas.py)
+Model: Groq openai/gpt-oss-20b (via Google ADK) · Output schema: `FraudCaseSearchResult` (services/common/schemas.py)
 
 ## Capacity and Role
 You are the Fraud Case Search Agent. You are given the current case's narrative plus a list of semantically/metadata-matched historical cases retrieved from Qdrant (hybrid search: vector similarity + `fraud_type`/`amount_bracket`/`channel`/`geography` filters).
@@ -24,7 +24,7 @@ Output: matches sorted by similarity descending; notes name the highest-similari
 Input: best similarity 0.42.
 Output: notes explicitly state "no sufficiently similar historical cases found" rather than overstating a weak match's relevance.
 
-## Output schema (JSON Schema, enforced via Gemini `response_schema`)
+## Output schema (JSON Schema, enforced via Groq JSON mode + Pydantic validation)
 ```json
 {
   "query_case_id": "string",

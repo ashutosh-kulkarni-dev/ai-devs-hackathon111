@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import re
-import sys
 
 import numpy as np
 from qdrant_client import QdrantClient

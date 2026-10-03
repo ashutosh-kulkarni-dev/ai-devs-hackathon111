@@ -1,13 +1,13 @@
 "use client";
 
-const API_KEY = process.env.NEXT_PUBLIC_API_GATEWAY_KEY || "demo-key-change-me";
-
+// Same-origin fetches are authorized by lib/auth.ts via the Origin header;
+// no API key is shipped in the browser bundle. External callers (curl, etc.)
+// present X-API-Key: $API_GATEWAY_KEY against the server.
 async function request(path: string, options: RequestInit = {}) {
   const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-API-Key": API_KEY,
       ...(options.headers || {}),
     },
   });
@@ -60,7 +60,6 @@ export const api = {
     narrative?: string;
     metadata_filter?: Record<string, string>;
   }) => request("/api/alerts", { method: "POST", body: JSON.stringify(payload) }),
-  demask: (caseId: string) => request(`/api/cases/${caseId}/demask`, { method: "POST" }),
   submitVerdict: (
     caseId: string,
     payload: { verdict: string; notes: string; fraud_type?: string; channel?: string; geography?: string }

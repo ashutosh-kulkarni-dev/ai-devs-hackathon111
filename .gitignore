@@ -6,8 +6,16 @@ node_modules/
 .next/
 dist/
 build/
-.env.local
-web/.env.local
+tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo
+
+# Env files: default-deny everything, allow only .example templates.
+# (`.env` at repo root is intentionally tracked as a non-secret docker-compose
+#  default — see the comment at the top of that file.)
+.env.*
+!.env.example
+!web/.env.example
+
 *.log
 .DS_Store
 qdrant_storage/

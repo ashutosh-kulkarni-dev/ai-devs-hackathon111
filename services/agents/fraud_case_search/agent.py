@@ -3,8 +3,9 @@ Fraud Case Search Agent (Google ADK-style worker).
 
 Subscribes to fraud-case-search-tasks, embeds the current case narrative,
 runs a hybrid Qdrant search (vector similarity + metadata filters on
-fraud_type/amount_bracket/channel/geography), and asks Gemini to summarize
-the matches into a schema-enforced FraudCaseSearchResult.
+fraud_type/amount_bracket/channel/geography), and asks Groq
+(openai/gpt-oss-20b) to summarize the matches into a schema-enforced
+FraudCaseSearchResult.
 
 This is the "Self-Improving Memory" retrieval half of the continuous
 learning loop described in PRD section 6; the write-back half lives in
@@ -15,7 +16,7 @@ import os
 import sys
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Filter, FieldCondition, MatchValue
+from qdrant_client.models import FieldCondition, Filter, MatchValue
 
 sys.path.insert(0, "/app/common")
 from audit import log_event  # noqa: E402

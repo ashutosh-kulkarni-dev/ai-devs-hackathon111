@@ -4,7 +4,12 @@ Lyzr Investigation Orchestrator client.
 Lyzr is the mandatory orchestration layer confirmed as "Met" in stage-1
 judging. Its job here: given a newly flagged (masked) case, decide the
 dispatch plan -- which worker agents to invoke and with what task
-parameters -- reasoning over Gemini 2.5 Pro via the Lyzr platform.
+parameters -- by calling out to whatever model the configured Lyzr Studio
+orchestrator agent runs. Unlike the four worker agents (which call Groq
+directly, see llm_client.py), this hop only ever talks to the Lyzr HTTP
+API -- the model behind it is whatever LYZR_ORCHESTRATOR_AGENT_ID is
+configured with in Lyzr Studio, not something this codebase calls or
+controls directly.
 
 The *mechanics* of dispatch (publishing to Pub/Sub, fanning out, collecting
 results asynchronously) are implemented in orchestrator.py as plain Python

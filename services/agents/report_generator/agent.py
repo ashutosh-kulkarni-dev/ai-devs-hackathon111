@@ -1,5 +1,5 @@
 """
-Report Generator Agent (Google ADK-style worker, Gemini 2.5 Pro).
+Report Generator Agent (Google ADK-style worker, Groq openai/gpt-oss-120b).
 
 Subscribes to report-generator-tasks. This message arrives only after the
 orchestrator has collected all three worker agents' results for a case
@@ -118,7 +118,18 @@ def _mock_report(case_id: str, kyc: dict, anomaly: dict, case_search: dict) -> d
     }
 
 
+TERMINAL_STATUSES = ("CONFIRMED_FRAUD", "FALSE_POSITIVE")
+
+
 def _persist_case(case_id: str, customer_id: str, account_id: str, report: dict):
+    """Insert or update the case with this report.
+
+    Guarded so a reprocessed report-generator task (now possible under
+    Phase 1 retries/redelivery) can never regress an already-resolved case
+    back to PENDING_REVIEW and silently discard an analyst's verdict: the
+    UPDATE branch only fires when the existing row is not already in a
+    terminal state. Reprocessing a resolved case becomes a no-op.
+    """
     conn = psycopg2.connect(**DB_CONF)
     try:
         with conn.cursor() as cur:
@@ -129,8 +140,10 @@ def _persist_case(case_id: str, customer_id: str, account_id: str, report: dict)
                 ON CONFLICT (case_id) DO UPDATE
                 SET status = 'PENDING_REVIEW', fraud_probability = EXCLUDED.fraud_probability,
                     report_json = EXCLUDED.report_json
+                WHERE investigation_cases.status NOT IN %s
                 """,
-                (case_id, customer_id, account_id, report["fraud_probability"], json.dumps(report)),
+                (case_id, customer_id, account_id, report["fraud_probability"], json.dumps(report),
+                 TERMINAL_STATUSES),
             )
         conn.commit()
     finally:

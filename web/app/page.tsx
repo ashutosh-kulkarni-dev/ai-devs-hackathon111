@@ -11,11 +11,13 @@ export default function Page() {
   const [auditStatus, setAuditStatus] = useState<{ valid: boolean; detail: string } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [demoMode, setDemoMode] = useState<boolean | null>(null);
   const sidebarRef = React.useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem("theme");
     if (saved === "dark") { setIsDark(true); document.documentElement.classList.add("dark"); }
+    fetch("/api/config").then(r => r.json()).then(c => setDemoMode(!!c.demo_mode)).catch(() => {});
   }, []);
 
   const toggleTheme = () => {
@@ -54,6 +56,22 @@ export default function Page() {
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
+      {demoMode && (
+        <div style={{
+          background: "#fef3c7", color: "#78350f",
+          borderBottom: "1px solid #fcd34d",
+          padding: "8px 24px", fontSize: "12px",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
+          flexShrink: 0, fontWeight: 500,
+        }}>
+          <span style={{ fontSize: "14px" }}>⚠️</span>
+          <span>
+            <strong>DEMO MODE</strong> — <code>GROQ_API_KEY</code> not configured on this deployment.
+            Every agent returns deterministic mock output; no real LLM calls are made.
+            Add the key to see live model reasoning.
+          </span>
+        </div>
+      )}
       {/* Top Nav */}
       <header style={{
         borderBottom: "1px solid var(--border)",

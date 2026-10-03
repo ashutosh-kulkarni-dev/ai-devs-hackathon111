@@ -1,11 +1,12 @@
 """
 Strict output schemas for every agent. These are the enforcement mechanism
-behind the CRISPE prompt appendix in docs/prompts/ -- Gemini is called with
-response_schema=<one of these>, so the model cannot return anything that
-doesn't match, and every downstream consumer (Report Generator, dashboard,
-audit log) can rely on the shape.
+behind the CRISPE prompt appendix in docs/prompts/ -- every agent calls Groq
+(see llm_client.py) in JSON mode and validates the response against one of
+these Pydantic models, so the model cannot return anything that doesn't
+match, and every downstream consumer (Report Generator, dashboard, audit
+log) can rely on the shape.
 """
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field
 

@@ -10,10 +10,9 @@ import datetime
 import os
 import uuid
 
+from embeddings import DIM, embed
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
-
-from embeddings import embed, DIM
+from qdrant_client.models import Distance, PointStruct, VectorParams
 
 QDRANT_URL = os.environ.get("QDRANT_URL", "http://localhost:6333")
 COLLECTION = os.environ.get("QDRANT_COLLECTION", "fraud_case_memory")
