@@ -98,41 +98,45 @@ export async function insertCase(caseId: string, customerId: string, accountId: 
   }
 }
 
-export async function updateCaseReport(caseId: string, report: any) {
+const TERMINAL = new Set(["CONFIRMED_FRAUD", "FALSE_POSITIVE"]);
+
+// Terminal-state guard: a reprocessed report (e.g. from a retried request)
+// must not overwrite an analyst's resolution. Matches services/ semantics.
+export async function updateCaseReport(caseId: string, report: any): Promise<boolean> {
   if (HAS_POSTGRES) {
     await ensureSchema();
-    await sql`
+    const { rowCount } = await sql`
       UPDATE investigation_cases
       SET status = 'PENDING_REVIEW', fraud_probability = ${report.fraud_probability}, report_json = ${JSON.stringify(report)}
-      WHERE case_id = ${caseId};
+      WHERE case_id = ${caseId} AND status NOT IN ('CONFIRMED_FRAUD', 'FALSE_POSITIVE');
     `;
-  } else {
-    const c = memCases.get(caseId);
-    if (c) {
-      c.status = "PENDING_REVIEW";
-      c.fraud_probability = report.fraud_probability;
-      c.report_json = report;
-    }
+    return (rowCount ?? 0) > 0;
   }
+  const c = memCases.get(caseId);
+  if (!c || TERMINAL.has(c.status)) return false;
+  c.status = "PENDING_REVIEW";
+  c.fraud_probability = report.fraud_probability;
+  c.report_json = report;
+  return true;
 }
 
-export async function updateCaseVerdict(caseId: string, verdict: string, notes: string) {
+export async function updateCaseVerdict(caseId: string, verdict: string, notes: string): Promise<boolean> {
   if (HAS_POSTGRES) {
     await ensureSchema();
-    await sql`
+    const { rowCount } = await sql`
       UPDATE investigation_cases
       SET status = ${verdict}, analyst_verdict = ${verdict}, analyst_notes = ${notes}, resolved_at = now()
-      WHERE case_id = ${caseId};
+      WHERE case_id = ${caseId} AND status NOT IN ('CONFIRMED_FRAUD', 'FALSE_POSITIVE');
     `;
-  } else {
-    const c = memCases.get(caseId);
-    if (c) {
-      c.status = verdict;
-      c.analyst_verdict = verdict;
-      c.analyst_notes = notes;
-      c.resolved_at = new Date().toISOString();
-    }
+    return (rowCount ?? 0) > 0;
   }
+  const c = memCases.get(caseId);
+  if (!c || TERMINAL.has(c.status)) return false;
+  c.status = verdict;
+  c.analyst_verdict = verdict;
+  c.analyst_notes = notes;
+  c.resolved_at = new Date().toISOString();
+  return true;
 }
 
 export async function listCases() {
@@ -170,14 +174,23 @@ export async function appendAudit(correlationId: string, actor: string, eventTyp
 
   if (HAS_POSTGRES) {
     await ensureSchema();
-    const { rows } = await sql`SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1;`;
-    const prevHash = rows[0]?.entry_hash || "0".repeat(64);
-    const entryHash = hashRow(prevHash, createdAt);
-    await sql`
-      INSERT INTO audit_log (correlation_id, actor, event_type, payload, prev_hash, entry_hash, created_at)
-      VALUES (${correlationId}, ${actor}, ${eventType}, ${JSON.stringify(payload)}, ${prevHash}, ${entryHash}, ${createdAt});
-    `;
-    return entryHash;
+    // Serialize chain-tip read + insert with a session-level advisory lock so
+    // concurrent serverless invocations can't both read the same prev_hash
+    // and produce a broken chain that verifyAuditChain() would then flag as
+    // tampered. 0xA0D17 is an arbitrary namespace constant for this chain.
+    await sql`SELECT pg_advisory_lock(658199);`;
+    try {
+      const { rows } = await sql`SELECT entry_hash FROM audit_log ORDER BY seq DESC LIMIT 1;`;
+      const prevHash = rows[0]?.entry_hash || "0".repeat(64);
+      const entryHash = hashRow(prevHash, createdAt);
+      await sql`
+        INSERT INTO audit_log (correlation_id, actor, event_type, payload, prev_hash, entry_hash, created_at)
+        VALUES (${correlationId}, ${actor}, ${eventType}, ${JSON.stringify(payload)}, ${prevHash}, ${entryHash}, ${createdAt});
+      `;
+      return entryHash;
+    } finally {
+      await sql`SELECT pg_advisory_unlock(658199);`;
+    }
   }
   const prevHash = memAudit.length ? memAudit[memAudit.length - 1].entry_hash : "0".repeat(64);
   const entryHash = hashRow(prevHash, createdAt);

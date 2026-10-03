@@ -28,7 +28,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const existing = await getCase(caseId);
   if (!existing) return NextResponse.json({ detail: "case not found" }, { status: 404 });
 
-  await updateCaseVerdict(caseId, body.verdict, body.notes);
+  const applied = await updateCaseVerdict(caseId, body.verdict, body.notes);
+  if (!applied) {
+    return NextResponse.json(
+      { detail: "case already resolved", case_id: caseId, status: existing.status },
+      { status: 409 }
+    );
+  }
 
   const report = existing.report_json || {};
   const narrative = (typeof report === "object" && report?.narrative) || body.notes || caseId;

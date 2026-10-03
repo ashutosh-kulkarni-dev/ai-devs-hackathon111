@@ -13,6 +13,10 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+
+// Groq + Lyzr fan-out can exceed the default 10s serverless timeout. Pro+
+// Vercel plans allow up to 60s; hobby ignores this and keeps 10s.
+export const maxDuration = 60;
 import { checkApiKey } from "@/lib/auth";
 import { maskText } from "@/lib/pii";
 import { getDispatchPlan } from "@/lib/lyzr";
@@ -41,7 +45,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ detail: "invalid request body", errors: e.errors || String(e) }, { status: 422 });
   }
 
-  const caseId = `CASE-NEW-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+  const caseId = `CASE-NEW-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
   const correlationId = caseId;
 
   const { maskedText } = (() => {
