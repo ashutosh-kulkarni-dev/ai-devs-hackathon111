@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 /**
  * Reports which capabilities are configured in this deployment.
  * The dashboard uses this to decide whether to show the "DEMO MODE" banner:
